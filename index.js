@@ -1,7 +1,9 @@
-const version = "0.0.3"
+const version = "0.0.4"
 
 let allowedDomains = process?.env?.ALLOWED_REMOTE_DOMAINS?.split(",") || ["*"];
 let imgproxyUrl = process?.env?.IMGPROXY_URL || "http://imgproxy:8080";
+const sourceRewriteFrom = process?.env?.SOURCE_REWRITE_FROM || "https://ny-1s.enzonix.com/bucket-1286-1793";
+const sourceRewriteTo = process?.env?.SOURCE_REWRITE_TO || "https://xxx.com";
 if (process.env.NODE_ENV === "development") {
     imgproxyUrl = "http://localhost:8888"
 }
@@ -27,14 +29,24 @@ Bun.serve({
     }
 });
 
+function rewriteSourceUrl(src) {
+    if (!sourceRewriteFrom || !sourceRewriteTo) return src;
+    if (!src.startsWith(sourceRewriteFrom)) return src;
+    return `${sourceRewriteTo}${src.slice(sourceRewriteFrom.length)}`;
+}
+
 async function resize(url) {
     const preset = "pr:sharp"
-    const src = url.pathname.split("/").slice(2).join("/");
+    const originalSrc = url.pathname.split("/").slice(2).join("/");
+    const src = rewriteSourceUrl(originalSrc);
     const origin = new URL(src).hostname;
     const allowed = allowedDomains.filter(domain => {
         if (domain === "*") return true;
         if (domain === origin) return true;
-        if (domain.startsWith("*.") && origin.endsWith(domain.split("*.").pop())) return true;
+        if (domain.startsWith("*.")) {
+            const baseDomain = domain.slice(2);
+            return origin === baseDomain || origin.endsWith(`.${baseDomain}`);
+        }
         return false;
     })
     if (allowed.length === 0) {
