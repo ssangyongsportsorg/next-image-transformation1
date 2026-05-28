@@ -1,16 +1,16 @@
-const version = "0.0.4"
+const version = "0.0.5"
 
 let allowedDomains = process?.env?.ALLOWED_REMOTE_DOMAINS?.split(",") || ["*"];
 let imgproxyUrl = process?.env?.IMGPROXY_URL || "http://imgproxy:8080";
-const sourceRewriteFrom = process?.env?.SOURCE_REWRITE_FROM || "https://ny-1s.enzonix.com/bucket-1286-1793";
-const sourceRewriteTo = process?.env?.SOURCE_REWRITE_TO || "https://xxx.com";
+const uploadsProxySource = process?.env?.UPLOADS_PROXY_SOURCE || "https://ny-1s.enzonix.com/bucket-1286-1793";
+const port = process?.env?.PORT || 3000;
 if (process.env.NODE_ENV === "development") {
     imgproxyUrl = "http://localhost:8888"
 }
 allowedDomains = allowedDomains.map(d => d.trim());
 
 Bun.serve({
-    port: 3000,
+    port,
     async fetch(req) {
         const url = new URL(req.url);
         if (url.pathname === "/") {
@@ -24,21 +24,37 @@ Bun.serve({
         if (url.pathname === "/health") {
             return new Response("OK");
         };
+        if (url.pathname.startsWith("/uploads/")) return await proxyUpload(req, url);
         if (url.pathname.startsWith("/image/")) return await resize(url);
         return Response.redirect("https://github.com/coollabsio/next-image-transformation", 302);
     }
 });
 
-function rewriteSourceUrl(src) {
-    if (!sourceRewriteFrom || !sourceRewriteTo) return src;
-    if (!src.startsWith(sourceRewriteFrom)) return src;
-    return `${sourceRewriteTo}${src.slice(sourceRewriteFrom.length)}`;
+async function proxyUpload(req, url) {
+    const upstreamUrl = `${uploadsProxySource}${url.pathname}${url.search}`;
+    try {
+        const upstream = await fetch(upstreamUrl, {
+            headers: {
+                "Accept": req.headers.get("Accept") || "*/*",
+                "User-Agent": req.headers.get("User-Agent") || "NextImageTransformation",
+            },
+        });
+        const headers = new Headers(upstream.headers);
+        headers.set("Server", "NextImageTransformation");
+        return new Response(upstream.body, {
+            status: upstream.status,
+            statusText: upstream.statusText,
+            headers,
+        });
+    } catch (e) {
+        console.log(e)
+        return new Response("Error proxying upload", { status: 502 })
+    }
 }
 
 async function resize(url) {
     const preset = "pr:sharp"
-    const originalSrc = url.pathname.split("/").slice(2).join("/");
-    const src = rewriteSourceUrl(originalSrc);
+    const src = url.pathname.split("/").slice(2).join("/");
     const origin = new URL(src).hostname;
     const allowed = allowedDomains.filter(domain => {
         if (domain === "*") return true;
